@@ -4,7 +4,7 @@ GeoGMLer is a JavaScript library designed to efficiently convert GML (Geography 
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
 ## Overview
 
@@ -37,6 +37,7 @@ const { xmlDoc, crsName } = geoGMLer.read(gmlData);
 const geoJson = geoGMLer.toGeoJSON({ xmlDoc, crsName });
 
 console.log(geoJson);
+```
 
 ## Key Methods
 
@@ -48,12 +49,8 @@ console.log(geoJson);
 
 ## Acknowledgments
 
-## Acknowledgments
-
 The structure and logic for this project are based on established methods for converting XML to GeoJSON, utilizing modern JavaScript practices for handling geographic data.  
-
-Project was inspired by the work of [gml2geojson](https://github.com/deyihu/gml2geojson)
-and builds upon the concepts and implementations found there.
+Project was inspired by the work of [gml2geojson](https://github.com/deyihu/gml2geojson) (MIT licensed) and builds upon the concepts and implementations found there.
 
 ## Project Home
 

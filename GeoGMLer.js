@@ -2,11 +2,37 @@
 // @name                GeoGMLer
 // @namespace           https://github.com/JS55CT
 // @description         GeoGMLer is a JavaScript library for converting GML data into GeoJSON. It translates FeatureMembers with Points, LineStrings, and Polygons, handling coordinates via gml:coordinates and gml:posList. Supports multi-geometries to ensure conversion to GeoJSON's FeatureCollection.
-// @version             1.0.0
+// @version             2.0.0
 // @author              JS55CT
-// @license             GNU GPLv3
+// @license             MIT
 // @match              *://this-library-is-not-supposed-to-run.com/*
 // ==/UserScript==
+
+/***********************************************************
+ * ## Project Home < https://github.com/JS55CT/GeoGMLer >
+ *  MIT License
+ * Copyright (c) 2022 hu de yi
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * - Project was inspired by the work of [gml2geojson](https://github.com/deyihu/gml2geojson) (MIT licensed)
+ *  and builds upon the concepts and implementations found there
+ **************************************************************/
 
 var GeoGMLer = (function () {
   /**
@@ -29,12 +55,25 @@ var GeoGMLer = (function () {
    * @property {Document} xmlDoc - The parsed XML document.
    * @property {string} crsName - The name of the coordinate reference system extracted from the GML.
    */
-  GeoGMLer.prototype.read = function (str) {
+  GeoGMLer.prototype.read = function (gmlText) {
     const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(str, "text/xml");
+    const xmlDoc = parser.parseFromString(gmlText, "application/xml");
 
-    // Extract the CRS directly within the read function
-    const crsName = this.getCRS(str);
+    // Check for parsing errors by looking for parser error tags
+    const parseErrors = xmlDoc.getElementsByTagName("parsererror");
+    if (parseErrors.length > 0) {
+      const errorMessages = Array.from(parseErrors)
+        .map((errorElement, index) => {
+          return `Parsing Error ${index + 1}: ${errorElement.textContent}`;
+        })
+        .join("\n");
+
+      console.error(errorMessages);
+      throw new Error("Failed to parse GML. See console for details.");
+    }
+
+    // Extract the CRS directly within the read function if parsing is successful
+    const crsName = this.getCRS(xmlDoc);
 
     // Return both the XML document and the CRS
     return {
@@ -64,32 +103,45 @@ var GeoGMLer = (function () {
 
     // Get the main element of the feature collection
     const featureCollectionEle = xmlDoc.children[0];
+
+    // Check if the node is a FeatureCollection, considering possible namespace prefixes
+    const nodeName = this.getNodeName(featureCollectionEle); // this returns lowercase by default
+    const isFeatureCollection = featureCollectionEle && featureCollectionEle.nodeName && nodeName.includes("featurecollection");
+
     // Validate the document structure
-    if (!featureCollectionEle || !featureCollectionEle.nodeName || this.getNodeName(featureCollectionEle).indexOf("featurecollection") === -1) {
+    if (!isFeatureCollection) {
+      console.error("Invalid GML structure: The document does not contain a valid FeatureCollection element.");
       return geojson; // Return empty GeoJSON if the structure is incorrect
     }
 
-    let i = 0;
     const features = [];
+
     // Iterate over each child node to extract feature members
-    while (i < featureCollectionEle.children.length) {
+    for (let i = 0; i < featureCollectionEle.children.length; i++) {
       const featureEle = featureCollectionEle.children.item(i);
-      const nodeName = this.getNodeName(featureEle);
-      // Identify and collect feature member elements
-      if (nodeName.indexOf("featuremember") > -1 && featureEle.children[0]) {
-        features.push(featureEle.children[0]);
+
+      if (featureEle) {
+        const childNodeName = this.getNodeName(featureEle);
+
+        // Identify and collect feature member elements
+        if (childNodeName.includes("featuremember") && featureEle.children[0]) {
+          features.push(featureEle.children[0]);
+        }
       }
-      i++;
     }
 
     // Process each feature member to extract properties and geometry
     for (let i = 0, len = features.length; i < len; i++) {
       const f = features[i];
+
       const properties = this.getFeatureEleProperties(f); // Extract properties
       const geometry = this.getFeatureEleGeometry(f, crsName); // Extract geometry using the provided CRS
+
       if (!geometry || !properties) {
+        console.error(`Skipping feature ${i + 1} due to missing geometry or properties.`);
         continue; // Skip if geometry or properties are missing
       }
+
       const feature = {
         type: "Feature",
         geometry,
@@ -106,10 +158,34 @@ var GeoGMLer = (function () {
    * @param {string} gmlString - The GML string.
    * @returns {string|null} - The CRS name or null.
    */
-  GeoGMLer.prototype.getCRS = function (gmlString) {
-    const srsNamePattern = /srsName="([^"]+)"/i;
-    const match = gmlString.match(srsNamePattern);
-    return match ? match[1] : null;
+  // Enhanced getCRS function to search for srsName attribute in various geometry nodes
+  GeoGMLer.prototype.getCRS = function (xmlDoc) {
+    // Define a list of common GML geometry elements to check for srsName attribute
+    const geometryTags = [
+      "gml:Envelope",
+      "gml:Point",
+      "gml:LineString",
+      "gml:Polygon",
+      "gml:MultiPoint",
+      "gml:MultiLineString",
+      "gml:MultiPolygon",
+      "gml:Surface",
+      "gml:Solid",
+      // Add other geometry types as needed
+    ];
+
+    for (const tag of geometryTags) {
+      const elements = xmlDoc.getElementsByTagName(tag);
+      for (let i = 0; i < elements.length; i++) {
+        const srsName = elements[i].getAttribute("srsName");
+        if (srsName) {
+          return srsName.trim();
+        }
+      }
+    }
+
+    // Consider additional handling or logging if no srsName is found
+    return null;
   };
 
   /**
